@@ -178,7 +178,7 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             var random = new Random();
             int randomnumber = random.Next(1, 999);
 
-            return $"{DateTime.Now.ToString("yyyyMMddHHmmssfff")}{randomnumber}{targetId.ToString("0000000000000")}";
+            return $"{DateTime.Now.ToString("yyyyMMddHHmmssfff")}{randomnumber}{targetId.ToString("000000000000")}";
         }
         public Stream CreateSecureEnvelope(string content, string userFileName, string executionSerial, string certificateThumbprint)
         {

@@ -49,15 +49,11 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             var props = this.GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
 
             foreach (var prop in props)
-
             {
 
                 if (prop.CanRead & prop.CanWrite)
-
                 {
-
                     prop.SetValue(this, PropertyBagHelper.ReadPropertyBag(propertyBag, prop.Name, prop.GetValue(this)));
-
                 }
 
             }
@@ -70,15 +66,11 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             var props = this.GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
 
             foreach (var prop in props)
-
             {
 
                 if (prop.CanRead & prop.CanWrite)
-
                 {
-
                     PropertyBagHelper.WritePropertyBag(propertyBag, prop.Name, prop.GetValue(this));
-
                 }
 
             }

@@ -52,8 +52,8 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
         [RequiredRuntime]
         public bool Disable { get; set; } = false;
 
-        [DisplayName("Validate")]
-        public bool DoValidate { get; set; } = false;
+        [Description("Validate Signature")]
+        public bool Verify { get; set; } = false;
 
         private bool Compressed { get; set; } = false;
 
@@ -78,25 +78,25 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             InterchangeID = (string)pInMsg.Context.Read("InterchangeID", BTS);
 
 
-            if (DoValidate)
+            if (Verify)
             {
                 bool valid = CheckSignature(pInMsg.BodyPart.Data);
 
                 if (valid == false)
                 {
-                    throw new InvalidOperationException($"Invalid Xml Signature for message {InterchangeID} detected");
+                    throw new CryptographicException($"Invalid bank Signature for message {InterchangeID} detected");
                 }
             }
 
             using (XmlReader reader = XmlReader.Create(pInMsg.BodyPart.Data))
             {
 
-                reader.ReadToFollowing("ResponseCode");
+                reader.CheckedReadToFollowing("ResponseCode");
                 ResponseCode = reader.ReadElementContentAsInt();
 
                 if(ResponseCode > 0)
                 {
-                    reader.ReadToFollowing("ResponseText");
+                    reader.CheckedReadToFollowing("ResponseText");
                     string responseText = reader.ReadElementContentAsString();
 
                     pInMsg.Context.Promote("FaultName", BTS, responseText);
@@ -104,7 +104,7 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
                
 
-                reader.ReadToFollowing("ExecutionSerial");
+                reader.CheckedReadToFollowing("ExecutionSerial");
                 ExecutionSerial = reader.ReadElementContentAsString();
 
                 if(ExecutionSerial.Length == 32)
@@ -115,10 +115,10 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
                 }
 
 
-                reader.ReadToFollowing("Compressed");
+                reader.CheckedReadToFollowing("Compressed");
                 Compressed = reader.ReadElementContentAsBoolean();
 
-                reader.ReadToFollowing("Content");
+                reader.CheckedReadToFollowing("Content");
 
                 outStm = Base64ElementToStream(reader);
 
@@ -129,9 +129,9 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             return pInMsg;
         }
 
-        private UInt64 GetExecutionTargetId(string executionSerial)
+        private string GetExecutionTargetId(string executionSerial)
         {
-            return UInt64.Parse(executionSerial.Substring(20));
+            return UInt64.Parse(executionSerial.Substring(20)).ToString();
         }
 
         private bool CheckSignature(Stream signedMessage)
