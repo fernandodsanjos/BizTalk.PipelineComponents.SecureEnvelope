@@ -14,6 +14,8 @@ using System.Xml.XPath;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using IComponent = Microsoft.BizTalk.Component.Interop.IComponent;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
 
 namespace BizTalk.PipelineComponents.SecureEnvelope
 {
@@ -55,6 +57,16 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
         [Description("Validate Signature")]
         public bool Verify { get; set; } = false;
 
+        [Description("Used when validating signature")]
+        public string Thumbprint { get; set; }
+
+        [Description("Used when validating signature")]
+        [DisplayName("Previous Thumbprint")]
+        public string PreviousThumbprint { get; set; }
+
+        [Description("Pass original message on error")]
+        [DisplayName("PassThru on error")]
+        public bool PassThru { get; set; }
         private bool Compressed { get; set; } = false;
 
         private int ResponseCode { get; set; } = 0;
@@ -63,11 +75,12 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
         private string InterchangeID { get; set; }
 
-       
+        
+        private ConcurrentDictionary<string, X509Certificate2> Certificates { get; set; } = new ConcurrentDictionary<string, X509Certificate2>();
         #endregion
         public IBaseMessage Execute(IPipelineContext pContext, IBaseMessage pInMsg)
         {
-            Stream outStm = null;
+           
 
             if (Disable)
                 return pInMsg;
@@ -84,12 +97,15 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
                 if (valid == false)
                 {
-                    throw new CryptographicException($"Invalid bank Signature for message {InterchangeID} detected");
+                    if (PromoteFault(pInMsg, $"Invalid bank Signature for message {InterchangeID} detected"))
+                         return pInMsg;
+
                 }
             }
 
             using (XmlReader reader = XmlReader.Create(pInMsg.BodyPart.Data))
             {
+                Stream outStm = null;
 
                 reader.CheckedReadToFollowing("ResponseCode");
                 ResponseCode = reader.ReadElementContentAsInt();
@@ -99,10 +115,9 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
                     reader.CheckedReadToFollowing("ResponseText");
                     string responseText = reader.ReadElementContentAsString();
 
-                    pInMsg.Context.Promote("FaultName", BTS, responseText);
+                    if (PromoteFault(pInMsg, responseText))
+                        return pInMsg;
                 }
-
-               
 
                 reader.CheckedReadToFollowing("ExecutionSerial");
                 ExecutionSerial = reader.ReadElementContentAsString();
@@ -114,7 +129,6 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
                     pInMsg.Context.Promote("DestinationParty", BTS, targetId);
                 }
 
-
                 reader.CheckedReadToFollowing("Compressed");
                 Compressed = reader.ReadElementContentAsBoolean();
 
@@ -122,12 +136,34 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
                 outStm = Base64ElementToStream(reader);
 
+                string messageType = GetmessageType(outStm);
+
+                pInMsg.Context.Promote("MessageType", BTS, messageType);
+
+                pContext.ResourceTracker.AddResource(outStm);
                 pInMsg.BodyPart.Data = outStm;
 
             }
 
             return pInMsg;
         }
+
+      
+        private bool PromoteFault(IBaseMessage pInMsg,string responseText)
+        {
+            
+            pInMsg.Context.Promote("FaultName", BTS, responseText);
+            pInMsg.Context.Promote("MessageType", BTS, "http://bxd.fi/xmldata/#ApplicationResponse");
+
+            if (PassThru)
+            {
+                pInMsg.BodyPart.Data.Seek(0, SeekOrigin.Begin);
+                return true;
+            }
+
+            return false;
+        }
+
 
         private string GetExecutionTargetId(string executionSerial)
         {
@@ -142,20 +178,18 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             SignedXml signedXml = new SignedXml(xmlDoc);
             X509Certificate2 cert = null;
 
+            if (String.IsNullOrEmpty(Thumbprint))
+                throw new ArgumentNullException("Thumbprint must be set to be able to verify signature!");
 
-            XmlNodeList certTags = xmlDoc.GetElementsByTagName("X509Certificate", "http://www.w3.org/2000/09/xmldsig#");
+            cert = GetCertificate(Thumbprint);
 
-            if(certTags.Count == 0)
-                 certTags = xmlDoc.GetElementsByTagName("X509Certificate");
-
-            XmlElement certTag = null;
-
-            if (certTags.Count == 0)
+            if (cert == null && PreviousThumbprint?.TrimEnd()?.Length > 0)
             {
-                LogEvent("Element X509Certificate is missing in message");
+                cert = GetCertificate(PreviousThumbprint);
             }
-            else
-                certTag = (XmlElement)certTags[0];
+                
+            if (cert == null)
+                throw new Exception($"Certificate with specified Thumbprint(s) {Thumbprint},{PreviousThumbprint} could not be found!");
 
             XmlNodeList signatureList = xmlDoc.GetElementsByTagName("Signature", "http://www.w3.org/2000/09/xmldsig#");
 
@@ -172,16 +206,6 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             }
                 signature = (XmlElement)signatureList[0];
 
-            try
-            {
-                Byte[] rawData = Convert.FromBase64String(certTag.InnerText);
-                cert = new X509Certificate2(rawData);
-            }
-            catch (CryptographicException ex)
-            {
-                LogEvent("Unable to load X509Certificate",ex);
-            }
-
             signedXml.LoadXml(signature);
             signedMessage.Position = 0;
 
@@ -196,32 +220,77 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             return valid;
 
         }
+
+        private X509Certificate2 GetCertificate(string thumbprint)
+        {
+           
+            X509Certificate2 cert = null;
+            thumbprint = thumbprint.ToLower();
+
+            if (Certificates.TryGetValue(thumbprint,out cert) == false)
+            {
+                using (X509Store certStore = new X509Store(StoreName.Root, StoreLocation.LocalMachine))
+                {
+                    certStore.Open(OpenFlags.ReadOnly);
+
+                    X509Certificate2Collection certCollection = certStore.Certificates.Find(
+                        X509FindType.FindByThumbprint, thumbprint, false);
+
+                    if (certCollection.Count > 0)
+                    {
+                        cert = certCollection[0];
+                        Certificates.TryAdd(thumbprint, cert);
+
+                    }
+
+                }
+            }
+
+            return cert;
+
+        }
         private  Stream Base64ElementToStream(XmlReader reader)
         {
-            VirtualStream outStm = new VirtualStream();
+
+            VirtualStream baseStm = new VirtualStream();
 
             byte[] buffer = new byte[8192];
             int readBytes = 0;
 
                 while ((readBytes = reader.ReadElementContentAsBase64(buffer, 0, buffer.Length)) > 0)
                 {
-                    outStm.Write(buffer, 0, readBytes);
+                    baseStm.Write(buffer, 0, readBytes);
                 }
 
-            outStm.Position = 0;
+            baseStm.Position = 0;
 
             if(Compressed)
             {
-                GZipStream zipStream = new GZipStream(outStm, CompressionMode.Decompress);
+                GZipStream zipStream = new GZipStream(baseStm, CompressionMode.Decompress);
                 return zipStream;
             }
             else
             {
-                return outStm;
+                return baseStm;
             }
  
         }
 
+        private string GetmessageType(Stream message)
+        {
+            string messageType = String.Empty;
+
+            using (XmlReader reader = XmlReader.Create(message, new XmlReaderSettings { IgnoreWhitespace = true, IgnoreComments = true, IgnoreProcessingInstructions = true }))
+            {
+                reader.MoveToContent();
+
+                messageType = $"{reader.NamespaceURI}#{reader.LocalName}";
+            }
+
+            message.Position = 0;
+
+            return messageType;
+        }
         private void LogEvent(string message,Exception exception = null)
         {
             EventLog.WriteEntry("BizTalk", $"SecureEnvelope failed to decode message with InterchangeId {InterchangeID} \n {message} \n {exception?.Message}");
