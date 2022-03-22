@@ -83,6 +83,7 @@
     <Compile Include="Decoder\Decoder.cs" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="BizTalk.PipelineComponents.SecureEnvelope.nuspec" />
     <None Include="key.snk" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

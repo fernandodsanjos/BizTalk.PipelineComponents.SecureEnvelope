@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
+  <metadata>
+    <id>BizTalk.PipelineComponents.SecureEnvelope</id>
+    <version>1.0.0.0</version>
+    <authors>Fernando Pires</authors>
+    <owners>Fernando Pires</owners>
+<projectUrl>https://github.com/fernandodsanjos/BizTalk.PipelineComponents.SecureEnvelope</projectUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Nordea Secure Envelope Encoder and Decoder</description>
+    <releaseNotes></releaseNotes>
+  </metadata>
+<files>
+	<file src="bin\debug\BizTalk.PipelineComponents.SecureEnvelope.dll" target="lib\net46" />
+</files>
+</package>

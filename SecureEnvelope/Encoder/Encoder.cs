@@ -182,13 +182,18 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
         }
         public Stream CreateSecureEnvelope(string content, string userFileName, string executionSerial, string certificateThumbprint)
         {
+            
             VirtualStream outstm = new VirtualStream();
+            XmlWriter wtr = XmlWriter.Create(outstm, new XmlWriterSettings { Indent = false , CloseOutput = false});
             DateTime currentDate = DateTime.Now;
             string currentdatestring = currentDate.ToString("yyyy-MM-ddThh:mm:ss.fffzzz");
             XmlDocument secureenvelope = new XmlDocument();
+
+            secureenvelope.PreserveWhitespace = false;
+           
             secureenvelope.LoadXml($@"<ApplicationRequest xmlns='http://bxd.fi/xmldata/'>
                         <CustomerId>{SecurityElement.Escape(CustomerId.ToString())}</CustomerId>
-                        <Command>UploadFile</Command>
+                        <Command>UPLOADFILE</Command>
                         <Timestamp>{SecurityElement.Escape(currentdatestring)}</Timestamp>
                         <Environment>{SecurityElement.Escape(Environment)}</Environment>
                         <UserFilename>{SecurityElement.Escape(userFileName)}</UserFilename>
@@ -199,14 +204,14 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
                         <SoftwareId>{SecurityElement.Escape(SoftwareId)}</SoftwareId>
                         <FileType>{SecurityElement.Escape(FileType)}</FileType>
                         <Content>{content}</Content>
-                    </ApplicationRequest>
-                    ");
+                    </ApplicationRequest>");
 
 
 
             XmlDocument signedsecureenvelope = SignXmlEnvelope(secureenvelope, certificateThumbprint);
 
-            signedsecureenvelope.Save(outstm);
+            signedsecureenvelope.Save(wtr);
+            wtr.Flush();
             outstm.Position = 0;
             //byte[] retvaluebytes = Encoding.UTF8.GetBytes(signedsecureenvelope.OuterXml);
 
@@ -224,7 +229,7 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
             SignedXml signedXml = new SignedXml(sourcedoc);
             signedXml.SigningKey = key;
-
+           
             Signature XMLSignature = signedXml.Signature;
 
             Reference reference = new Reference("");
@@ -243,18 +248,11 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             XMLSignature.KeyInfo = keyInfo;
 
             signedXml.ComputeSignature();
-           
+
             XmlElement xmlDigitalSignature = signedXml.GetXml();
-
-            sourcedoc.DocumentElement.AppendChild(sourcedoc.ImportNode(xmlDigitalSignature, true));
-
-            /*
-            if (sourcedoc.FirstChild is XmlDeclaration)
-            {
-                sourcedoc.RemoveChild(sourcedoc.FirstChild);
-            }
-            */
-
+            
+            sourcedoc.DocumentElement.AppendChild(sourcedoc.ImportNode(xmlDigitalSignature,true));
+            
             return sourcedoc;
         }
 
