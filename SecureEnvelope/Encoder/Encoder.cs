@@ -17,6 +17,7 @@ using IComponent = Microsoft.BizTalk.Component.Interop.IComponent;
 using System.IO.Compression;
 using System.Configuration;
 using System.Diagnostics;
+using Microsoft.XLANGs.BaseTypes;
 
 namespace BizTalk.PipelineComponents.SecureEnvelope
 {
@@ -144,6 +145,7 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
                 //Used for correlation between this request and its response
                 //pInMsg.Context.Write("ExecutionSerial", Namespace, executionSerial);
 
+                CertificateThumbprint = CheckThumbprint(CertificateThumbprint, pInMsg.Context);
                 // byte[] secureenv
                 Stream secureenvstream = CreateSecureEnvelope(fileasbase64, userFileName, executionSerial, CertificateThumbprint);
                 // MemoryStream secureenvstream = new MemoryStream(secureenv);
@@ -280,6 +282,29 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             }
 
             return x509cert;
+        }
+
+        private string CheckThumbprint(string CertificateThumbprint, IBaseMessageContext context)
+        {
+            string tmb = CertificateThumbprint;
+
+            if (String.IsNullOrEmpty(CertificateThumbprint))
+            {
+                XmlQName signerCert = new BTS.SigningCert().QName;
+
+                tmb = (string)context.Read(signerCert.Name, signerCert.Namespace);
+
+                if (String.IsNullOrEmpty(tmb))
+                {
+                    throw new ArgumentNullException("CheckThumbprint", "Could not resolve signing certificate");
+                }
+               
+
+            }
+
+            return tmb;
+
+
         }
 
         private void LogEvent(string message, Exception exception = null)
