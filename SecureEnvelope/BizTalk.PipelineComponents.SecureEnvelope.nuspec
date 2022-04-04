@@ -8,7 +8,7 @@
 <projectUrl>https://github.com/fernandodsanjos/BizTalk.PipelineComponents.SecureEnvelope</projectUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <description>Nordea Secure Envelope Encoder and Decoder</description>
-    <releaseNotes></releaseNotes>
+    <releaseNotes>Added possibility to assign Signercert or thumbprint through context</releaseNotes>
   </metadata>
 <files>
 	<file src="bin\debug\BizTalk.PipelineComponents.SecureEnvelope.dll" target="lib\net46" />
