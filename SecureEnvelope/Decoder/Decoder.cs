@@ -25,6 +25,7 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
     public partial class Decoder : IComponent, IBaseComponent, IComponentUI
     {
         const string BTS = "http://schemas.microsoft.com/BizTalk/2003/system-properties";
+        const string SEC = "http://SecureEnvelope";
         #region Name & Description
 
         public string Name
@@ -43,7 +44,7 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
         {
             get
             {
-                return "Nordea Secure Envelope Decoder";
+                return "Nordea Secure Envelope (1.2) Decoder";
 
             }
         }
@@ -76,6 +77,7 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
         private string InterchangeID { get; set; }
 
         
+
         private ConcurrentDictionary<string, X509Certificate2> Certificates { get; set; } = new ConcurrentDictionary<string, X509Certificate2>();
         #endregion
         public IBaseMessage Execute(IPipelineContext pContext, IBaseMessage pInMsg)
@@ -97,8 +99,16 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
                 if (valid == false)
                 {
+
+                    pInMsg.Context.Promote("ResponseCode", SEC, (object)-1);
+
                     if (PromoteFault(pInMsg, $"Invalid bank Signature for message {InterchangeID} detected"))
-                         return pInMsg;
+                    {
+                        return pInMsg;
+                    }
+
+                    
+                   
 
                 }
             }
@@ -110,27 +120,39 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
                 reader.CheckedReadToFollowing("ResponseCode");
                 ResponseCode = reader.ReadElementContentAsInt();
 
-                if(ResponseCode > 0)
-                {
-                    reader.CheckedReadToFollowing("ResponseText");
-                    string responseText = reader.ReadElementContentAsString();
+                pInMsg.Context.Promote("ResponseCode",SEC, (object)ResponseCode);
 
-                    if (PromoteFault(pInMsg, responseText))
-                        return pInMsg;
-                }
+                reader.CheckedReadToFollowing("ResponseText");
+                string responseText = reader.ReadElementContentAsString();
 
                 reader.CheckedReadToFollowing("ExecutionSerial");
                 ExecutionSerial = reader.ReadElementContentAsString();
 
                 if(ExecutionSerial.Length == 32)
                 {
+                    //If used with messsage Encoded with BizTalk.PipelineComponents.SecureEnvelope.Encoder
                     var targetId = GetExecutionTargetId(ExecutionSerial);
                    
-                    pInMsg.Context.Promote("DestinationParty", BTS, targetId);
+                    pInMsg.Context.Promote("SignerID", SEC, targetId);
                 }
 
                 reader.CheckedReadToFollowing("Compressed");
                 Compressed = reader.ReadElementContentAsBoolean();
+
+                if (ExecutionSerial.Length != 32)
+                {
+                    reader.CheckedReadToFollowing("ParentFileReference");//new in v 1.2
+                    string signerId = reader.ReadElementContentAsString();
+
+                    pInMsg.Context.Promote("SignerID", SEC, signerId);
+                }
+
+                if (ResponseCode > 0)
+                {
+
+                    if (PromoteFault(pInMsg, responseText))
+                        return pInMsg;
+                }
 
                 reader.CheckedReadToFollowing("Content");
 
@@ -152,8 +174,8 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
         private bool PromoteFault(IBaseMessage pInMsg,string responseText)
         {
             
-            pInMsg.Context.Promote("FaultName", BTS, responseText);
-            pInMsg.Context.Promote("MessageType", BTS, "http://bxd.fi/xmldata/#ApplicationResponse");
+            pInMsg.Context.Promote("ResponseText", SEC, responseText);
+         
 
             if (PassThru)
             {

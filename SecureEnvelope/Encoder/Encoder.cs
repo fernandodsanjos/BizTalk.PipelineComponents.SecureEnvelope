@@ -18,6 +18,7 @@ using System.IO.Compression;
 using System.Configuration;
 using System.Diagnostics;
 using Microsoft.XLANGs.BaseTypes;
+using System.Collections.Generic;
 
 namespace BizTalk.PipelineComponents.SecureEnvelope
 {
@@ -74,10 +75,16 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
         
         public string CertificateThumbprint { get; set; }
-        
+
+        [DisplayName("Certificate Common Name")]
+        public string CertificateCN { get; set; }
+
         #endregion
 
         private string InterchangeID { get; set; }
+
+        private Dictionary<string, string> CertificateSubjectInfo { get; set; }
+
 
         public IBaseMessage Execute(IPipelineContext pContext, IBaseMessage pInMsg)
         {
@@ -86,6 +93,16 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
             if (pInMsg?.BodyPart?.Data == null)
                 return pInMsg;
+
+            
+            if (String.IsNullOrEmpty(CertificateCN))
+            {
+                XmlQName sourceParty = new BTS.SourceParty().QName;
+
+                CertificateCN = (string)pInMsg.Context.Read(sourceParty.Name, sourceParty.Namespace);
+
+            }
+
             //Use VirtualStream when handling streams
             //ContextProperty prop = new ContextProperty(Property);
 
@@ -141,13 +158,19 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
                 string fileasbase64 = Convert.ToBase64String(bytebodypart);
 
+                CertificateThumbprint = CheckThumbprint(pInMsg.Context);
+
+                X509Certificate2 cert = GetCertificate(CertificateThumbprint);
+
+                TargetId = CheckTargetId(TargetId);
+
                 string executionSerial = CreateExecutionSerial();
                 //Used for correlation between this request and its response
                 //pInMsg.Context.Write("ExecutionSerial", Namespace, executionSerial);
 
-                CertificateThumbprint = CheckThumbprint(CertificateThumbprint, pInMsg.Context);
+               
                 // byte[] secureenv
-                Stream secureenvstream = CreateSecureEnvelope(fileasbase64, userFileName, executionSerial, CertificateThumbprint);
+                Stream secureenvstream = CreateSecureEnvelope(fileasbase64, userFileName, executionSerial, cert);
                 // MemoryStream secureenvstream = new MemoryStream(secureenv);
                 // secureenvstream.Position = 0;
 
@@ -182,7 +205,7 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
             return $"{DateTime.Now.ToString("yyyyMMddHHmmssfff")}{randomnumber}{targetId.ToString("000000000000")}";
         }
-        public Stream CreateSecureEnvelope(string content, string userFileName, string executionSerial, string certificateThumbprint)
+        public Stream CreateSecureEnvelope(string content, string userFileName, string executionSerial, X509Certificate2 cert)
         {
             
             VirtualStream outstm = new VirtualStream();
@@ -192,7 +215,8 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             XmlDocument secureenvelope = new XmlDocument();
 
             secureenvelope.PreserveWhitespace = false;
-           
+
+
             secureenvelope.LoadXml($@"<ApplicationRequest xmlns='http://bxd.fi/xmldata/'>
                         <CustomerId>{SecurityElement.Escape(CustomerId.ToString())}</CustomerId>
                         <Command>UPLOADFILE</Command>
@@ -208,9 +232,9 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
                         <Content>{content}</Content>
                     </ApplicationRequest>");
 
+            
 
-
-            XmlDocument signedsecureenvelope = SignXmlEnvelope(secureenvelope, certificateThumbprint);
+            XmlDocument signedsecureenvelope = SignXmlEnvelope(secureenvelope, cert);
 
             signedsecureenvelope.Save(wtr);
             wtr.Flush();
@@ -221,10 +245,8 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
         }
 
-        public XmlDocument SignXmlEnvelope(XmlDocument sourcedoc, string certificateThumbprint)
+        public XmlDocument SignXmlEnvelope(XmlDocument sourcedoc, X509Certificate2 cert)
         {
-            X509Certificate2 cert = new X509Certificate2();
-            cert = GetCertificate(certificateThumbprint);
 
             RSACryptoServiceProvider key = new RSACryptoServiceProvider();
             key = (RSACryptoServiceProvider)cert.PrivateKey;
@@ -270,27 +292,82 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             {
                 if (cert.Thumbprint.Replace("-", "").ToUpper() == certificateThumbprint.Replace("-", "").ToUpper())
                 {
-                    csp = (RSACryptoServiceProvider)cert.PrivateKey;
-                    x509cert = cert;
-                    break;
+                    LoadSubjectInfo(cert.Subject);
+
+                    if (VerifyCertificateParty(cert))
+                    {
+
+                        csp = (RSACryptoServiceProvider)cert.PrivateKey;
+
+                        x509cert = cert;
+                        break;
+                    }
+
+                    
                 }
             }
 
             if (csp == null)
             {
-                throw new Exception($"BizTalk.PipelineComponents.SecureEnvelope.Encoder. Certificate {certificateThumbprint} coud not be found!");
+                throw new Exception($"BizTalk.PipelineComponents.SecureEnvelope.Encoder. Certificate {certificateThumbprint} with CN {CertificateCN} not be found!");
             }
+
+            
 
             return x509cert;
         }
 
-        private string CheckThumbprint(string CertificateThumbprint, IBaseMessageContext context)
+
+        private void LoadSubjectInfo(string subject)
+        {
+            CertificateSubjectInfo = new Dictionary<string, string>();
+
+
+            string[] subjectparts = subject.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+
+            for (int i = 0; i < subjectparts.Length; i++)
+            {
+                string[] subjectpart = subjectparts[i].Split('=');
+
+                CertificateSubjectInfo.Add(subjectpart[0].Trim(), subjectpart[1].Trim());
+            }
+
+            
+        }
+
+        private string CheckTargetId(string targetId)
+        {
+            if(String.IsNullOrEmpty(TargetId))
+            {
+                TargetId = CertificateSubjectInfo["SERIALNUMBER"];
+            }
+
+            return TargetId;
+        }
+        private bool VerifyCertificateParty(X509Certificate2 cert)
+        {
+            
+            if (String.IsNullOrEmpty(CertificateCN))
+                return true;
+
+            var name = CertificateSubjectInfo["CN"];
+
+            return (name.Trim() == CertificateCN);
+        }
+
+        /// <summary>
+        /// If CertificateThumbprint is empty then thumbprint is resolved from context BTS.SignatureCertificate
+        /// </summary>
+        /// <param name="CertificateThumbprint"></param>
+        /// <param name="context"></param>
+        /// <returns></returns>
+        private string CheckThumbprint(IBaseMessageContext context)
         {
             string tmb = CertificateThumbprint;
 
             if (String.IsNullOrEmpty(CertificateThumbprint))
             {
-                XmlQName signerCert = new BTS.SigningCert().QName;
+                XmlQName signerCert = new BTS.SignatureCertificate().QName;
 
                 tmb = (string)context.Read(signerCert.Name, signerCert.Namespace);
 
