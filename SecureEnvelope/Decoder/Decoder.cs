@@ -113,7 +113,7 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
                 }
             }
 
-            using (XmlReader reader = XmlReader.Create(pInMsg.BodyPart.Data))
+            using (XmlReader reader = XmlReader.Create(pInMsg.BodyPart.Data,new XmlReaderSettings { CloseInput = false }))
             {
                 Stream outStm = null;
 
@@ -127,6 +127,8 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
                 reader.CheckedReadToFollowing("ExecutionSerial");
                 ExecutionSerial = reader.ReadElementContentAsString();
+
+                pInMsg.Context.Write("ExecutionSerial", SEC,(object)ExecutionSerial);
 
                 if(ExecutionSerial.Length == 32)
                 {

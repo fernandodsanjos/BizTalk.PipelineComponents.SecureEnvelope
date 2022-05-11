@@ -27,6 +27,7 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
     [ComponentCategory(CategoryTypes.CATID_Encoder)]
     public partial class Encoder : IComponent, IBaseComponent, IComponentUI
     {
+
         #region Name & Description
 
         public string Name
@@ -61,7 +62,9 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
         public UInt64 CustomerId { get; set; }
         public string Environment { get; set; }
 
-
+        /// <summary>
+        /// SignerID. Can also be specified in context BTS.SourcePartyID 
+        /// </summary>
         [RegularExpression(@"^[0-9]{1,80}$", ErrorMessage = "Max number is 80")]
         public string TargetId { get; set; }
 
@@ -73,10 +76,12 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
         public string SoftwareId { get; set; }
         public string FileType { get; set; }
 
-        
+        /// <summary>
+        /// Signer certificate Thumbprint. Can also be specified in context BTS.SignatureCertificate 
+        /// </summary>
         public string CertificateThumbprint { get; set; }
 
-        [DisplayName("Certificate Common Name")]
+        [DisplayName("Certificate Common Name. Only used to verify that correct ceritificate has been specified")]
         public string CertificateCN { get; set; }
 
         #endregion
@@ -160,9 +165,35 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
                 CertificateThumbprint = CheckThumbprint(pInMsg.Context);
 
-                X509Certificate2 cert = GetCertificate(CertificateThumbprint);
+                X509Certificate2 cert = null;
 
-                TargetId = CheckTargetId(TargetId);
+                if (String.IsNullOrEmpty(CertificateThumbprint) == false)
+                {
+                    cert = GetCertificateByThumbprint(CertificateThumbprint);
+                    TargetId = CheckTargetId(TargetId);
+                }
+                
+                if(String.IsNullOrEmpty(TargetId))
+                {
+                    XmlQName context = new BTS.SourcePartyID().QName;
+
+                    string sourcePartyID = (string)pInMsg.Context.Read(context.Name, context.Namespace);
+
+                    if(sourcePartyID == null)
+                    {
+                        throw new ArgumentNullException("Certificate", "Could not resolve signing certificate by either (CertificateThumbprint)SignatureCertificate or (TargetId)SourcePartyID");
+                    }
+                    else
+                    {
+                        TargetId = sourcePartyID;
+                        cert = GetCertificateBySourcePartyID(TargetId);
+
+                       
+                    }
+                }
+                
+
+                
 
                 string executionSerial = CreateExecutionSerial();
                 //Used for correlation between this request and its response
@@ -280,7 +311,48 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             return sourcedoc;
         }
 
-        public X509Certificate2 GetCertificate(string certificateThumbprint)
+        public X509Certificate2 GetCertificateBySourcePartyID(string sourcePartyID)
+        {
+            X509Store localStore = new X509Store(StoreLocation.LocalMachine);
+
+            localStore.Open(OpenFlags.ReadOnly);
+            RSACryptoServiceProvider csp = null;
+            X509Certificate2 x509cert = null;
+
+            foreach (X509Certificate2 cert in localStore.Certificates)
+            {
+                
+                LoadSubjectInfo(cert.Subject);
+                string serialNumber = null;
+
+               if (CertificateSubjectInfo.TryGetValue("SERIALNUMBER", out serialNumber))
+               {
+
+                    if (sourcePartyID == serialNumber)
+                    {
+                        if (VerifyCertificateParty(cert))
+                        {
+
+                            csp = (RSACryptoServiceProvider)cert.PrivateKey;
+
+                            x509cert = cert;
+                            break;
+                        }
+
+
+                    }
+                }
+            }
+
+            if (csp == null)
+            {
+                throw new Exception($"BizTalk.PipelineComponents.SecureEnvelope.Encoder. Certificate with SERIALNUMBER {sourcePartyID} and CN {CertificateCN} could not be found!");
+            }
+
+            return x509cert;
+
+        }
+        public X509Certificate2 GetCertificateByThumbprint(string certificateThumbprint)
         {
             X509Store localStore = new X509Store(StoreLocation.LocalMachine);
 
@@ -309,7 +381,7 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
             if (csp == null)
             {
-                throw new Exception($"BizTalk.PipelineComponents.SecureEnvelope.Encoder. Certificate {certificateThumbprint} with CN {CertificateCN} not be found!");
+                throw new Exception($"BizTalk.PipelineComponents.SecureEnvelope.Encoder. Certificate with Thumbprint {certificateThumbprint} and CN {CertificateCN} not be found!");
             }
 
             
@@ -370,12 +442,6 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
                 XmlQName signerCert = new BTS.SignatureCertificate().QName;
 
                 tmb = (string)context.Read(signerCert.Name, signerCert.Namespace);
-
-                if (String.IsNullOrEmpty(tmb))
-                {
-                    throw new ArgumentNullException("CheckThumbprint", "Could not resolve signing certificate");
-                }
-               
 
             }
 
