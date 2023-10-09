@@ -117,6 +117,10 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             {
                 Stream outStm = null;
 
+                // Get Message Type
+                reader.MoveToContent();
+                pInMsg.Context.Promote("MessageType", BTS, $"{reader.NamespaceURI}#{reader.LocalName}");
+
                 reader.CheckedReadToFollowing("ResponseCode");
                 ResponseCode = reader.ReadElementContentAsInt();
 
@@ -290,8 +294,12 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
 
             if(Compressed)
             {
-                GZipStream zipStream = new GZipStream(baseStm, CompressionMode.Decompress);
-                return zipStream;
+                VirtualStream decompressedMemStream = new VirtualStream();
+                GZipStream gzipStream = new GZipStream(baseStm, CompressionMode.Decompress);
+                gzipStream.CopyTo(decompressedMemStream);
+                decompressedMemStream.Position = 0;
+
+                return decompressedMemStream;
             }
             else
             {
@@ -300,21 +308,6 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
  
         }
 
-        private string GetmessageType(Stream message)
-        {
-            string messageType = String.Empty;
-
-            using (XmlReader reader = XmlReader.Create(message, new XmlReaderSettings { IgnoreWhitespace = true, IgnoreComments = true, IgnoreProcessingInstructions = true }))
-            {
-                reader.MoveToContent();
-
-                messageType = $"{reader.NamespaceURI}#{reader.LocalName}";
-            }
-
-            message.Position = 0;
-
-            return messageType;
-        }
         private void LogEvent(string message,Exception exception = null)
         {
             EventLog.WriteEntry("BizTalk", $"SecureEnvelope failed to decode message with InterchangeId {InterchangeID} \n {message} \n {exception?.Message}");
