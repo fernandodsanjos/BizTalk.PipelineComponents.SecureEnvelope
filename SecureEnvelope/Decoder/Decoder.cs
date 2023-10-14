@@ -113,60 +113,104 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
                 }
             }
 
+            Stream outStm = null;
+
             using (XmlReader reader = XmlReader.Create(pInMsg.BodyPart.Data,new XmlReaderSettings { CloseInput = false }))
             {
-                Stream outStm = null;
+                
+                string responseText = String.Empty;
 
-                // Get Message Type
+                // Get original Message Type
                 reader.MoveToContent();
                 pInMsg.Context.Promote("MessageType", BTS, $"{reader.NamespaceURI}#{reader.LocalName}");
 
-                reader.CheckedReadToFollowing("ResponseCode");
-                ResponseCode = reader.ReadElementContentAsInt();
+               
 
-                pInMsg.Context.Promote("ResponseCode",SEC, (object)ResponseCode);
-
-                reader.CheckedReadToFollowing("ResponseText");
-                string responseText = reader.ReadElementContentAsString();
-
-                reader.CheckedReadToFollowing("ExecutionSerial");
-                ExecutionSerial = reader.ReadElementContentAsString();
-
-                pInMsg.Context.Write("ExecutionSerial", SEC,(object)ExecutionSerial);
-
-                if(ExecutionSerial.Length == 32)
+                while (reader.Read())
                 {
-                    //If used with messsage Encoded with BizTalk.PipelineComponents.SecureEnvelope.Encoder
-                    var targetId = GetExecutionTargetId(ExecutionSerial);
-                   
-                    pInMsg.Context.Promote("SignerID", SEC, targetId);
-                }
+                    if(reader.IsStartElement())
+                    {
+                        bool nextElement = true; 
 
-                reader.CheckedReadToFollowing("Compressed");
-                Compressed = reader.ReadElementContentAsBoolean();
+                        while (nextElement)
+                        {
+                            switch (reader.LocalName)
+                            {
+                                case "ResponseCode":
+                                    ResponseCode = reader.ReadElementContentAsInt();
 
-                if (ExecutionSerial.Length != 32)
-                {
-                    reader.CheckedReadToFollowing("ParentFileReference");//new in v 1.2
-                    string signerId = reader.ReadElementContentAsString();
+                                    pInMsg.Context.Promote("ResponseCode", SEC, (object)ResponseCode);
 
-                    pInMsg.Context.Promote("SignerID", SEC, signerId);
+                                    break;
+                                case "ResponseText":
+                                    responseText = reader.ReadElementContentAsString();
+                                    break;
+                                case "ExecutionSerial":
+                                    ExecutionSerial = reader.ReadElementContentAsString();
+
+                                    pInMsg.Context.Write("ExecutionSerial", SEC, (object)ExecutionSerial);
+
+                                    //If used with messsage Encoded with BizTalk.PipelineComponents.SecureEnvelope.Encoder
+                                    if (ExecutionSerial.Length == 32)
+                                    {
+                                        var targetId = GetExecutionTargetId(ExecutionSerial);
+
+                                        pInMsg.Context.Promote("SignerID", SEC, targetId);
+                                    }
+
+                                    break;
+                                case "Compressed":
+                                    Compressed = reader.ReadElementContentAsBoolean();
+                                    break;
+                                case "ParentFileReference":
+                                    if (ExecutionSerial.Length != 32)
+                                    {
+                                        //new in v 1.2
+                                        string signerId = reader.ReadElementContentAsString();
+
+                                        if (signerId.Length > 1)
+                                        {
+                                            pInMsg.Context.Promote("SignerID", SEC, signerId);
+                                        }
+
+                                    }
+                                    else
+                                        nextElement = false;
+                                    break;
+                                case "Content":
+                                    if (ResponseCode == 0 || PassThru == false)
+                                    {
+                                        reader.CheckedReadToFollowing("Content");
+
+                                        outStm = Base64ElementToStream(reader);
+
+                                        string messageType = GetmessageType(outStm);
+
+                                        pInMsg.Context.Promote("MessageType", BTS, messageType);
+                                    }
+                                    else
+                                        nextElement = false;
+                                    break;
+                                default:
+                                    nextElement = false;
+                                    break;
+                            }
+                        }
+                      
+                    }
+
                 }
 
                 if (ResponseCode > 0)
                 {
 
                     if (PromoteFault(pInMsg, responseText))
+                    {
+                        pInMsg.BodyPart.Data.Position = 0;
                         return pInMsg;
+                    }
+                       
                 }
-
-                reader.CheckedReadToFollowing("Content");
-
-                outStm = Base64ElementToStream(reader);
-
-                string messageType = GetmessageType(outStm);
-
-                pInMsg.Context.Promote("MessageType", BTS, messageType);
 
                 pContext.ResourceTracker.AddResource(outStm);
                 pInMsg.BodyPart.Data = outStm;
@@ -176,7 +220,23 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
             return pInMsg;
         }
 
-      
+    
+
+        private string GetmessageType(Stream message)
+        {
+            string messageType = String.Empty;
+
+            using (XmlReader reader = XmlReader.Create(message, new XmlReaderSettings { IgnoreWhitespace = true, IgnoreComments = true, IgnoreProcessingInstructions = true }))
+            {
+                reader.MoveToContent();
+
+                messageType = $"{reader.NamespaceURI}#{reader.LocalName}";
+            }
+
+            message.Position = 0;
+
+            return messageType;
+        }
         private bool PromoteFault(IBaseMessage pInMsg,string responseText)
         {
             

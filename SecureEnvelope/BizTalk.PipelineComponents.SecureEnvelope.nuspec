@@ -2,13 +2,13 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
   <metadata>
     <id>BizTalk.PipelineComponents.SecureEnvelope</id>
-    <version>1.0.0.1</version>
+    <version>1.0.0.2</version>
     <authors>Fernando Pires</authors>
     <owners>Fernando Pires</owners>
 <projectUrl>https://github.com/fernandodsanjos/BizTalk.PipelineComponents.SecureEnvelope</projectUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <description>Nordea Secure Envelope Encoder and Decoder</description>
-	  <releaseNotes>Added possibility to assign client certificate, through context,either by CertificateThumbprint (BTS.SignatureCertificate) or TargetID (BTS.SourcePartyID)</releaseNotes>
+	  <releaseNotes>BUG fix for zipped content and better content parsing</releaseNotes>
   </metadata>
 <files>
 	<file src="bin\debug\BizTalk.PipelineComponents.SecureEnvelope.dll" target="lib\net46" />
