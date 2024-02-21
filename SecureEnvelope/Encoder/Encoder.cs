@@ -279,18 +279,24 @@ namespace BizTalk.PipelineComponents.SecureEnvelope
         public XmlDocument SignXmlEnvelope(XmlDocument sourcedoc, X509Certificate2 cert)
         {
 
-            RSACryptoServiceProvider key = new RSACryptoServiceProvider();
-            key = (RSACryptoServiceProvider)cert.PrivateKey;
+
+            RSA key = RSACertificateExtensions.GetRSAPrivateKey(cert);
 
             SignedXml signedXml = new SignedXml(sourcedoc);
             signedXml.SigningKey = key;
-           
+
+            signedXml.SignedInfo.CanonicalizationMethod = "http://www.w3.org/2001/10/xml-exc-c14n#";
+            signedXml.SignedInfo.SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+
+
             Signature XMLSignature = signedXml.Signature;
 
             Reference reference = new Reference("");
 
             XmlDsigEnvelopedSignatureTransform env = new XmlDsigEnvelopedSignatureTransform();
             reference.AddTransform(env);
+
+            reference.DigestMethod = "http://www.w3.org/2001/04/xmlenc#sha256";
 
             XMLSignature.SignedInfo.AddReference(reference);
 
